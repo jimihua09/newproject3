@@ -715,8 +715,27 @@
   });
 
   // Buttons
-  startBtn.addEventListener('click', startSelection);
-  resetBtn.addEventListener('click', resetAll);
+  let _touchStarted = false;
+  startBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    _touchStarted = true;
+    startSelection();
+  }, { passive: false });
+  startBtn.addEventListener('click', function(e) {
+    if (_touchStarted) { _touchStarted = false; return; }
+    startSelection();
+  });
+
+  let _touchReset = false;
+  resetBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    _touchReset = true;
+    resetAll();
+  }, { passive: false });
+  resetBtn.addEventListener('click', function(e) {
+    if (_touchReset) { _touchReset = false; return; }
+    resetAll();
+  });
 
   // Events
   touchArea.addEventListener('touchstart', handleTouchStart, { passive: false });
