@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>手指挑选器</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  body { background: #0a0a1a; color: #e0e0f0; display: flex; align-items: center; justify-content: center; }
+
+  #app {
+    width: 100%; height: 100%; max-width: 1000px; max-height: 900px;
+    display: flex; flex-direction: column; padding: 12px; gap: 10px;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; background: rgba(255,255,255,0.04); border-radius: 14px;
+    flex-shrink: 0; flex-wrap: wrap; gap: 8px;
+  }
+  header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 1px; white-space: nowrap; }
+  .config { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+  .config input[type="range"] {
+    width: 100px; accent-color: #6c6cff; cursor: pointer;
+  }
+  .config .count-display {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(108,108,255,0.2); color: #b0b0ff; font-weight: 700; font-size: 0.95rem;
+  }
+
+  /* ---- Touch Area ---- */
+  #touchArea {
+    flex: 1; position: relative; border-radius: 16px; overflow: hidden;
+    background: radial-gradient(ellipse at 30% 40%, #151535, #08081a);
+    box-shadow: inset 0 0 80px rgba(60,60,180,0.08), 0 0 0 1px rgba(255,255,255,0.04);
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    cursor: crosshair; min-height: 280px;
+  }
+  #touchArea .grid-pattern {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0.06;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* -- Finger Circles (DOM) -- */
+  .finger-circle {
+    position: absolute; border-radius: 50%; pointer-events: none;
+    transform: translate(-50%, -50%);
+    width: 60px; height: 60px;
+    background: rgba(255,255,255,0.06);
+    border: 2px solid rgba(255,255,255,0.7);
+    box-shadow: 0 0 18px rgba(255,255,255,0.15), inset 0 0 12px rgba(255,255,255,0.05);
+    transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
+    z-index: 2;
+  }
+  .finger-circle .inner {
+    position: absolute; inset: 10px; border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    box-shadow: inset 0 0 8px rgba(255,255,255,0.1);
+  }
+  .finger-circle.selected {
+    border-color: #ffd700;
+    box-shadow: 0 0 30px rgba(255,215,0,0.5), 0 0 60px rgba(255,215,0,0.2), inset 0 0 16px rgba(255,215,0,0.05);
+    background: rgba(255,215,0,0.08);
+  }
+  .finger-circle.selected .inner {
+    background: rgba(255,215,0,0.2);
+    box-shadow: inset 0 0 12px rgba(255,215,0,0.15);
+  }
+  .finger-circle .checkmark {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; opacity: 0; transform: scale(0.3);
+    transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    pointer-events: none; z-index: 3;
+  }
+  .finger-circle.selected .checkmark { opacity: 1; transform: scale(1); }
+  .finger-circle .number-tag {
+    position: absolute; top: -8px; right: -8px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #ffd700; color: #1a1a2e;
+    font-size: 0.7rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transform: scale(0); transition: opacity 0.3s, transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  .finger-circle.selected .number-tag { opacity: 1; transform: scale(1); }
+
+  /* -- Canvas overlay -- */
+  #overlay {
+    position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    pointer-events: none; z-index: 4;
+  }
+
+  /* ---- Footer ---- */
+  footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; background: rgba(255,255,255,0.04); border-radius: 14px;
+    flex-shrink: 0; flex-wrap: wrap; gap: 8px;
+  }
+  .status-bar { display: flex; align-items: center; gap: 12px; font-size: 0.85rem; }
+  .status-bar .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 12px; border-radius: 20px; background: rgba(255,255,255,0.06);
+  }
+  .status-bar .pill .num { font-weight: 700; color: #ffd700; min-width: 14px; text-align: center; }
+  .btn-group { display: flex; gap: 8px; }
+  .btn {
+    padding: 8px 22px; border: none; border-radius: 10px; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+    letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.95); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+  .btn-primary {
+    background: linear-gradient(135deg, #5c5cff, #3a3acc);
+    color: #fff; box-shadow: 0 2px 14px rgba(92,92,255,0.3);
+  }
+  .btn-primary:hover:not(:disabled) { box-shadow: 0 4px 24px rgba(92,92,255,0.45); }
+  .btn-reset {
+    background: rgba(255,255,255,0.08); color: #b0b0c0;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .btn-reset:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+
+  .hint {
+    font-size: 0.8rem; color: rgba(255,255,255,0.3); text-align: center;
+    flex-basis: 100%; padding-top: 2px;
+    transition: color 0.3s;
+  }
+  .hint.active { color: rgba(255,255,255,0.6); }
+  .hint.error { color: #ff6b6b; }
+  .hint.success { color: #ffd700; }
+
+  /* ---- Selection Flash ---- */
+  .flash-overlay {
+    position: absolute; inset: 0; pointer-events: none; z-index: 5;
+    border-radius: 16px; opacity: 0; transition: opacity 0.1s;
+  }
+  .flash-overlay.show { opacity: 1; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 480px) {
+    #app { padding: 8px; gap: 8px; }
+    header h1 { font-size: 1rem; }
+    .config input[type="range"] { width: 70px; }
+    .finger-circle { width: 48px; height: 48px; }
+    .finger-circle .inner { inset: 7px; }
+    .finger-circle .checkmark { font-size: 1.2rem; }
+    .btn { padding: 7px 16px; font-size: 0.8rem; }
+  }
+  @media (min-width: 768px) {
+    .finger-circle { width: 72px; height: 72px; }
+    .finger-circle .inner { inset: 12px; }
+    .finger-circle .checkmark { font-size: 2rem; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>&#10022; 手指挑选器</h1>
+    <div class="config">
+      <label for="countSlider">挑选人数</label>
+      <input type="range" id="countSlider" min="1" max="20" value="3">
+      <span class="count-display" id="countDisplay">3</span>
+    </div>
+  </header>
+
+  <div id="touchArea">
+    <div class="grid-pattern"></div>
+    <div class="flash-overlay" id="flashOverlay"></div>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <footer>
+    <div class="status-bar">
+      <span class="pill">已选中 <span class="num" id="selectedNum">0</span></span>
+      <span class="pill">目标 <span class="num" id="targetNum">3</span></span>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="startBtn">&#127916; 开始</button>
+      <button class="btn btn-reset" id="resetBtn">&#10218; 重置</button>
+    </div>
+    <div class="hint" id="hint">请将手指放在屏幕上开始</div>
+  </footer>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // DOM refs
+  const touchArea = document.getElementById('touchArea');
+  const canvas = document.getElementById('overlay');
+  const ctx = canvas.getContext('2d');
+  const countSlider = document.getElementById('countSlider');
+  const countDisplay = document.getElementById('countDisplay');
+  const selectedNum = document.getElementById('selectedNum');
+  const targetNum = document.getElementById('targetNum');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const hint = document.getElementById('hint');
+  const flashOverlay = document.getElementById('flashOverlay');
+
+  // State
+  const state = {
+    circles: [],
+    touchMap: new Map(),
+    nextId: 1,
+    targetCount: 3,
+    phase: 'idle',
+    selectedSoFar: 0,
+    animId: null,
+  };
+
+  // Orb animation state
+  const orb = {
+    x: 0, y: 0,
+    target: null,
+    speed: 4,
+    minSpeed: 0.8,
+    maxSpeed: 14,
+    bounces: 0,
+    totalBounces: 12,
+    round: 0,
+    isFinalApproach: false,
+    finalCircle: null,
+    trail: [],
+  };
+
+  // Canvas resize
+  function resizeCanvas() {
+    const rect = touchArea.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function getTouchAreaRect() {
+    return touchArea.getBoundingClientRect();
+  }
+
+  function clientToArea(clientX, clientY) {
+    const rect = getTouchAreaRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
+
+  // Circle DOM helpers
+  function createCircleElement() {
+    const el = document.createElement('div');
+    el.className = 'finger-circle';
+    el.innerHTML = '<div class="inner"></div><div class="checkmark">&#10022;</div><div class="number-tag"></div>';
+    return el;
+  }
+
+  function updateCirclePosition(ele, x, y) {
+    ele.style.left = x + 'px';
+    ele.style.top = y + 'px';
+  }
+
+  // Add / Remove circles
+  function addCircle(x, y, touchId) {
+    if (state.phase === 'selecting' || state.phase === 'done') return;
+    const id = state.nextId++;
+    const ele = createCircleElement();
+    updateCirclePosition(ele, x, y);
+    touchArea.appendChild(ele);
+    const circle = { id, x, y, selected: false, order: 0, ele, beingTouched: !!touchId };
+    state.circles.push(circle);
+    if (touchId !== null) {
+      state.touchMap.set(touchId, circle);
+    }
+    updateUI();
+    return circle;
+  }
+
+  function removeCircle(circle) {
+    if (circle.selected) return;
+    if (state.phase === 'selecting') {
+      circle.beingTouched = false;
+      return;
+    }
+    const idx = state.circles.indexOf(circle);
+    if (idx !== -1) {
+      state.circles.splice(idx, 1);
+      if (circle.ele.parentNode) circle.ele.parentNode.removeChild(circle.ele);
+    }
+    for (const [key, val] of state.touchMap) {
+      if (val.id === circle.id) { state.touchMap.delete(key); break; }
+    }
+    updateUI();
+  }
+
+  function clearAllCircles() {
+    state.circles.forEach(c => { if (c.ele.parentNode) c.ele.parentNode.removeChild(c.ele); });
+    state.circles = [];
+    state.touchMap.clear();
+    state.selectedSoFar = 0;
+    updateUI();
+  }
+
+  // UI updates
+  function updateUI() {
+    selectedNum.textContent = state.selectedSoFar;
+    targetNum.textContent = state.targetCount;
+    countDisplay.textContent = state.targetCount;
+
+    if (state.phase === 'idle') {
+      if (state.circles.length === 0) {
+        startBtn.disabled = true;
+        hint.textContent = '请将手指放在屏幕上开始';
+        hint.className = 'hint';
+      } else if (state.circles.length < state.targetCount) {
+        startBtn.disabled = true;
+        hint.textContent = '还需要 ' + (state.targetCount - state.circles.length) + ' 位参与者 (目前 ' + state.circles.length + ' 人)';
+        hint.className = 'hint active';
+      } else {
+        startBtn.disabled = false;
+        hint.textContent = '已就绪 — 点击「开始」进行挑选';
+        hint.className = 'hint active';
+      }
+    } else if (state.phase === 'selecting') {
+      startBtn.disabled = true;
+      hint.textContent = '挑选中… 请保持手指触碰屏幕';
+      hint.className = 'hint active';
+    } else if (state.phase === 'done') {
+      startBtn.disabled = true;
+      hint.textContent = '&#127881; 挑选完成！点击「重置」重新开始';
+      hint.className = 'hint success';
+    }
+  }
+
+  // Touch / Mouse events
+  function handleTouchStart(e) {
+    e.preventDefault();
+    if (state.phase === 'selecting' || state.phase === 'done') return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const pos = clientToArea(t.clientX, t.clientY);
+      if (!state.touchMap.has(t.identifier)) {
+        addCircle(pos.x, pos.y, t.identifier);
+      }
+    }
+  }
+
+  function handleTouchEnd(e) {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const circle = state.touchMap.get(t.identifier);
+      if (circle) {
+        state.touchMap.delete(t.identifier);
+        removeCircle(circle);
+      }
+    }
+  }
+
+  function handleTouchCancel(e) {
+    e.preventDefault();
+    for (const [, circle] of state.touchMap) {
+      removeCircle(circle);
+    }
+    state.touchMap.clear();
+  }
+
+  function handleMouseDown(e) {
+    if (e.button !== 0) return;
+    if (state.phase === 'selecting' || state.phase === 'done') return;
+    const pos = clientToArea(e.clientX, e.clientY);
+    const existing = state.circles.find(c =>
+      Math.hypot(c.x - pos.x, c.y - pos.y) < 30
+    );
+    if (existing && !existing.selected) {
+      removeCircle(existing);
+    } else if (!existing) {
+      addCircle(pos.x, pos.y, null);
+    }
+  }
+
+  // Orb animation selection logic
+  function getUnselectedCircles() {
+    return state.circles.filter(c => !c.selected);
+  }
+
+  function pickRandomCircle(exclude) {
+    const candidates = getUnselectedCircles().filter(c => c !== exclude);
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  function startSelectionRound() {
+    const unselected = getUnselectedCircles();
+    if (unselected.length === 0) {
+      finishSelection();
+      return;
+    }
+
+    orb.round++;
+    orb.bounces = 0;
+    orb.isFinalApproach = false;
+    orb.finalCircle = null;
+
+    orb.totalBounces = 8 + orb.round * 3;
+    if (orb.totalBounces > 30) orb.totalBounces = 30;
+
+    const finalTarget = unselected[Math.floor(Math.random() * unselected.length)];
+    orb.finalCircle = finalTarget;
+
+    const firstTarget = pickRandomCircle(finalTarget);
+    if (!firstTarget) {
+      selectCircle(finalTarget);
+      return;
+    }
+
+    orb.x = firstTarget.x;
+    orb.y = firstTarget.y;
+    orb.target = firstTarget;
+    orb.speed = 4;
+    orb.trail = [{ x: orb.x, y: orb.y }];
+
+    if (!state.animId) {
+      lastTime = performance.now();
+      state.animId = requestAnimationFrame(animationLoop);
+    }
+  }
+
+  function selectCircle(circle) {
+    if (circle.selected) return;
+    circle.selected = true;
+    circle.order = state.selectedSoFar + 1;
+    state.selectedSoFar++;
+
+    circle.ele.classList.add('selected');
+    const tag = circle.ele.querySelector('.number-tag');
+    if (tag) tag.textContent = circle.order;
+
+    flashOverlay.style.background = 'radial-gradient(circle at ' + circle.x + 'px ' + circle.y + 'px, rgba(255,215,0,0.25), transparent 60%)';
+    flashOverlay.classList.add('show');
+    setTimeout(function() { flashOverlay.classList.remove('show'); }, 300);
+
+    updateUI();
+
+    if (state.selectedSoFar >= state.targetCount) {
+      setTimeout(finishSelection, 500);
+    } else {
+      setTimeout(function() {
+        if (state.phase === 'selecting') {
+          orb.trail = [];
+          startSelectionRound();
+        }
+      }, 800);
+    }
+  }
+
+  function finishSelection() {
+    state.phase = 'done';
+    if (state.animId) {
+      cancelAnimationFrame(state.animId);
+      state.animId = null;
+    }
+    orb.trail = [];
+    drawCanvas();
+
+    flashOverlay.style.background = 'radial-gradient(ellipse at 50% 50%, rgba(255,215,0,0.15), transparent 70%)';
+    flashOverlay.classList.add('show');
+    setTimeout(function() { flashOverlay.classList.remove('show'); }, 600);
+    updateUI();
+  }
+
+  // Animation loop
+  let lastTime = 0;
+
+  function animationLoop(timestamp) {
+    if (state.phase !== 'selecting') return;
+    var dt = Math.min((timestamp - lastTime) / 16.667, 3);
+    lastTime = timestamp;
+    updateOrb(dt);
+    drawCanvas();
+    state.animId = requestAnimationFrame(animationLoop);
+  }
+
+  function updateOrb(dt) {
+    if (!orb.target) return;
+
+    var dx = orb.target.x - orb.x;
+    var dy = orb.target.y - orb.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 3) {
+      orb.x = orb.target.x;
+      orb.y = orb.target.y;
+
+      if (orb.isFinalApproach) {
+        selectCircle(orb.finalCircle);
+        return;
+      }
+
+      orb.bounces++;
+      orb.trail.push({ x: orb.x, y: orb.y });
+      if (orb.trail.length > 8) orb.trail.shift();
+
+      if (orb.bounces >= orb.totalBounces) {
+        orb.isFinalApproach = true;
+        orb.target = orb.finalCircle;
+        orb.speed = Math.max(orb.minSpeed, orb.speed * 0.4);
+      } else {
+        var exclude = orb.target;
+        var next = pickRandomCircle(exclude);
+        if (!next) {
+          orb.isFinalApproach = true;
+          orb.target = orb.finalCircle;
+          orb.speed = Math.max(orb.minSpeed, orb.speed * 0.4);
+        } else {
+          orb.target = next;
+          var progress = orb.bounces / orb.totalBounces;
+          if (progress < 0.7) {
+            orb.speed = Math.min(orb.maxSpeed, orb.speed * 1.08);
+          } else {
+            orb.speed = Math.max(orb.minSpeed, orb.speed * 0.94);
+          }
+        }
+      }
+    } else {
+      var speedFactor = orb.isFinalApproach ? 0.5 : 1;
+      var step = orb.speed * dt * speedFactor;
+      var moveDist = Math.min(step, dist);
+      orb.x += (dx / dist) * moveDist;
+      orb.y += (dy / dist) * moveDist;
+
+      if (orb.trail.length === 0) {
+        orb.trail.push({ x: orb.x, y: orb.y });
+      } else {
+        var last = orb.trail[orb.trail.length - 1];
+        if (Math.hypot(orb.x - last.x, orb.y - last.y) > 6) {
+          orb.trail.push({ x: orb.x, y: orb.y });
+          if (orb.trail.length > 10) orb.trail.shift();
+        }
+      }
+    }
+  }
+
+  function drawCanvas() {
+    var rect = touchArea.getBoundingClientRect();
+    var w = rect.width;
+    var h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Subtle connections between circles
+    if (state.circles.length > 1) {
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth = 1;
+      var unselected = state.circles.filter(function(c) { return !c.selected; });
+      for (var i = 1; i < unselected.length; i++) {
+        ctx.moveTo(unselected[i-1].x, unselected[i-1].y);
+        ctx.lineTo(unselected[i].x, unselected[i].y);
+      }
+      ctx.stroke();
+    }
+
+    // Orb trail
+    if (orb.trail.length > 1) {
+      for (var i = 1; i < orb.trail.length; i++) {
+        var alpha = i / orb.trail.length * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(orb.trail[i-1].x, orb.trail[i-1].y);
+        ctx.lineTo(orb.trail[i].x, orb.trail[i].y);
+        ctx.strokeStyle = 'rgba(100, 180, 255, ' + alpha + ')';
+        ctx.lineWidth = 2 * (i / orb.trail.length);
+        ctx.stroke();
+      }
+    }
+
+    // Orb glow
+    if (orb.x !== 0 || orb.y !== 0) {
+      var gradient = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, 50);
+      gradient.addColorStop(0, 'rgba(200, 230, 255, 1)');
+      gradient.addColorStop(0.15, 'rgba(150, 200, 255, 0.8)');
+      gradient.addColorStop(0.4, 'rgba(80, 130, 255, 0.2)');
+      gradient.addColorStop(1, 'rgba(80, 130, 255, 0)');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, 50, 0, Math.PI * 2);
+      ctx.fill();
+
+      var orbGrad = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, 12);
+      orbGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      orbGrad.addColorStop(0.5, 'rgba(200, 230, 255, 0.6)');
+      orbGrad.addColorStop(1, 'rgba(100, 180, 255, 0)');
+      ctx.fillStyle = orbGrad;
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Final approach beam
+    if (orb.isFinalApproach && orb.target) {
+      ctx.beginPath();
+      ctx.moveTo(orb.x, orb.y);
+      ctx.lineTo(orb.target.x, orb.target.y);
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.15)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 8]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Pulse rings on unselected circles
+    if (state.phase === 'selecting') {
+      var unsel = state.circles.filter(function(c) { return !c.selected; });
+      var pulse = Math.sin(performance.now() / 300) * 0.3 + 0.7;
+      for (var i = 0; i < unsel.length; i++) {
+        ctx.beginPath();
+        ctx.arc(unsel[i].x, unsel[i].y, 32, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.08 * pulse) + ')';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Phase transitions
+  function startSelection() {
+    if (state.phase === 'selecting' || state.phase === 'done') return;
+    if (state.circles.length < state.targetCount) return;
+
+    state.circles.forEach(function(c) { c.beingTouched = true; });
+
+    state.phase = 'selecting';
+    state.selectedSoFar = 0;
+    state.circles.forEach(function(c) {
+      c.selected = false;
+      c.order = 0;
+      c.ele.classList.remove('selected');
+      var tag = c.ele.querySelector('.number-tag');
+      if (tag) tag.textContent = '';
+    });
+
+    updateUI();
+
+    var first = state.circles[Math.floor(Math.random() * state.circles.length)];
+    orb.x = first.x;
+    orb.y = first.y;
+    orb.trail = [];
+
+    startSelectionRound();
+  }
+
+  function resetAll() {
+    if (state.animId) {
+      cancelAnimationFrame(state.animId);
+      state.animId = null;
+    }
+    state.phase = 'idle';
+    state.selectedSoFar = 0;
+    orb.trail = [];
+    orb.x = 0; orb.y = 0;
+    orb.target = null;
+    orb.isFinalApproach = false;
+    orb.finalCircle = null;
+    flashOverlay.classList.remove('show');
+
+    state.circles.forEach(function(c) {
+      if (c.ele.parentNode) c.ele.parentNode.removeChild(c.ele);
+    });
+    state.circles = [];
+    state.touchMap.clear();
+    state.nextId = 1;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    updateUI();
+  }
+
+  // Slider
+  countSlider.addEventListener('input', function() {
+    state.targetCount = parseInt(this.value, 10);
+    updateUI();
+  });
+
+  // Buttons
+  startBtn.addEventListener('click', startSelection);
+  resetBtn.addEventListener('click', resetAll);
+
+  // Events
+  touchArea.addEventListener('touchstart', handleTouchStart, { passive: false });
+  touchArea.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+  touchArea.addEventListener('touchend', handleTouchEnd, { passive: false });
+  touchArea.addEventListener('touchcancel', handleTouchCancel, { passive: false });
+  touchArea.addEventListener('mousedown', handleMouseDown);
+
+  // Resize
+  window.addEventListener('resize', function() {
+    resizeCanvas();
+    state.circles.forEach(function(c) {
+      updateCirclePosition(c.ele, c.x, c.y);
+    });
+  });
+
+  // Init
+  resizeCanvas();
+  updateUI();
+
+  // Idle draw loop
+  function idleDraw() {
+    if (state.phase !== 'idle') return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (state.circles.length > 1) {
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth = 1;
+      for (var i = 1; i < state.circles.length; i++) {
+        ctx.moveTo(state.circles[i-1].x, state.circles[i-1].y);
+        ctx.lineTo(state.circles[i].x, state.circles[i].y);
+      }
+      ctx.stroke();
+      var pulse = Math.sin(performance.now() / 400) * 0.3 + 0.7;
+      for (var i = 0; i < state.circles.length; i++) {
+        ctx.beginPath();
+        ctx.arc(state.circles[i].x, state.circles[i].y, 30, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.05 * pulse) + ')';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+    requestAnimationFrame(idleDraw);
+  }
+  requestAnimationFrame(idleDraw);
+
+})();
+</script>
+</body>
+</html>
